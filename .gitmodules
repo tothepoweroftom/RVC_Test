@@ -1,0 +1,3 @@
+[submodule "vendor/world"]
+	path = vendor/world
+	url = git@github.com:mmorise/World.git

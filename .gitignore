@@ -1,0 +1,16 @@
+/*/Builds/*
+/*/JuceLibraryCode
+/build/
+/build_*/
+.idea/
+.vs/
+.vscode/
+libs/*
+Sounds/*
+_Tools/setup/node_modules/*
+_lastBuild/*
+/modules/
+/test_audio/
+/output_audio/
+/onnx_models/
+/vendor/
