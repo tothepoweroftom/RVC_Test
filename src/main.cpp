@@ -187,10 +187,9 @@ class OnnxRVC
 
     std::vector<float> inference(const std::string& raw_path,
                                  int sid,
-                                 const std::string& f0_method = "harvest",
-                                 float f0_up_key              = 1,
-                                 float pad_time               = 0.5,
-                                 float cr_threshold           = 0.02)
+                                 float f0_up_key    = 1,
+                                 float pad_time     = 0.5,
+                                 float cr_threshold = 0.02)
     {
         // Load and resample audio
         std::vector<float> wav = myk_tiny::loadWav(raw_path);
@@ -201,21 +200,19 @@ class OnnxRVC
 
         // Get hubert features as Ort::Value tensor
         Ort::Value hubert_tensor = forward_vec_model(wav);
-        // Double the hubert along the 1st dimension
-        // Convert back to vector
+        //
 
         // Get output shape
         auto output_shape =
           hubert_tensor.GetTensorTypeAndShapeInfo().GetShape();
-        int hubert_length = output_shape[1] * 2;
+        int hubert_length = output_shape[1];
 
         std::cout << "Hubert length: " << hubert_length << std::endl;
         std::cout << "Hubert length: " << output_shape[0] << " "
                   << output_shape[2] << std::endl;
 
         // Compute F0
-        auto [pitchf, pitch] =
-          compute_f0(wav, hubert_length, f0_method, f0_up_key);
+        auto [pitchf, pitch] = compute_f0(wav, hubert_length, 1);
 
         // Prepare input tensors
         std::vector<int64_t> ds = { sid };
@@ -279,18 +276,14 @@ class OnnxRVC
         return std::move(output_tensors.front());
     }
 
-    std::pair<std::vector<float>, std::vector<int64_t>> compute_f0(
-      const std::vector<float>& wav,
-      int length,
-      const std::string& method,
-      float up_key)
+    std::pair<std::vector<float>, std::vector<int64_t>>
+    compute_f0(const std::vector<float>& wav, int length, float up_key)
     {
         // Convert wav to double precision for Harvest
         std::vector<double> wav_double(wav.begin(), wav.end());
 
         // Determine f0_method
-        int f0_method =
-          (method == "harvest") ? 0 : 1; // Assuming 0 for Harvest, 1 for Dio
+        int f0_method = 1;
 
         // Estimate F0
         auto [f0, temporal_positions] = estimateF0(wav_double, 16000, 1);
@@ -461,7 +454,7 @@ main()
                     "amitaro_v2_16k.onnx");
         std::vector<float> output =
           rvc.inference("/Users/thomaspower/Developer/Koala/RVC_Test/"
-                        "test_audio/Lead_Vocal_16.wav",
+                        "test_audio/Lead_Vocal_1.wav",
                         0);
 
         // Save or process the output as needed
@@ -469,7 +462,7 @@ main()
                           1,
                           16000,
                           "/Users/thomaspower/Developer/Koala/RVC_Test/"
-                          "output_audio/output.wav");
+                          "output_audio/output1.wav");
     }
     catch (const Ort::Exception& e)
     {
