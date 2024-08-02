@@ -272,8 +272,48 @@ class OnnxRVC
                                           output_names,
                                           1);
 
-        // Return the first output tensor
-        return std::move(output_tensors.front());
+        // Get output tensor
+        Ort::Value& output_tensor = output_tensors.front();
+
+        // Get output shape and data
+        auto output_shape =
+          output_tensor.GetTensorTypeAndShapeInfo().GetShape();
+        float* output_data = output_tensor.GetTensorMutableData<float>();
+
+        // Calculate new dimensions
+        int64_t batch    = output_shape[0];
+        int64_t time     = output_shape[1];
+        int64_t channels = output_shape[2];
+
+        // Create new tensor with doubled time dimension
+        std::vector<int64_t> new_shape = { batch, time * 2, channels };
+        std::vector<float> new_data(batch * time * 2 * channels);
+
+        // Repeat the time dimension
+        for (int64_t b = 0; b < batch; ++b)
+        {
+            for (int64_t t = 0; t < time; ++t)
+            {
+                for (int64_t c = 0; c < channels; ++c)
+                {
+                    float value =
+                      output_data[b * (time * channels) + t * channels + c];
+                    new_data[b * (time * 2 * channels) + (t * 2) * channels +
+                             c]                          = value;
+                    new_data[b * (time * 2 * channels) +
+                             (t * 2 + 1) * channels + c] = value;
+                }
+            }
+        }
+
+        Ort::Value new_tensor =
+          Ort::Value::CreateTensor<float>(memory_info,
+                                          new_data.data(),
+                                          new_data.size(),
+                                          new_shape.data(),
+                                          new_shape.size());
+
+        return new_tensor;
     }
 
     std::pair<std::vector<float>, std::vector<int64_t>>
