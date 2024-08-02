@@ -4,10 +4,13 @@
 #include <vector>
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include <samplerate.h>
 
 #include <world/harvest.h>
 #include <world/dio.h>
+
+static const int sr = 40000;
 
 std::vector<float>
 runContentVec(const std::string& modelPath,
@@ -16,9 +19,9 @@ runContentVec(const std::string& modelPath,
 {
     Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "ContentVecTest");
     Ort::SessionOptions session_options;
-    session_options.SetIntraOpNumThreads(1);
+    session_options.SetIntraOpNumThreads(12);
     session_options.SetGraphOptimizationLevel(
-      GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+      GraphOptimizationLevel::ORT_ENABLE_BASIC);
 
     Ort::Session session(env, modelPath.c_str(), session_options);
 
@@ -68,7 +71,7 @@ runContentVec(const std::string& modelPath,
 }
 
 std::pair<std::vector<float>, std::vector<float>>
-estimateF0(const std::vector<double>& wav, int fs, int f0_method = 1)
+estimateF0(const std::vector<double>& wav, int fs, int f0_method = 0)
 {
     HarvestOption option;
     InitializeHarvestOption(&option);
@@ -95,6 +98,7 @@ estimateF0(const std::vector<double>& wav, int fs, int f0_method = 1)
         std::vector<float> f0_float(f0.begin(), f0.end());
         std::vector<float> temporal_positions_float(temporal_positions.begin(),
                                                     temporal_positions.end());
+        return { f0_float, temporal_positions_float };
     }
     else
     {
@@ -183,6 +187,7 @@ class OnnxRVC
       , model_path(model_path)
 
     {
+        ////std::cout << "Sampling rate: " << sampling_rate << std::endl;
     }
 
     std::vector<float> inference(const std::string& raw_path,
@@ -191,42 +196,72 @@ class OnnxRVC
                                  float pad_time     = 0.5,
                                  float cr_threshold = 0.02)
     {
-        // Load and resample audio
-        std::vector<float> wav = myk_tiny::loadWav(raw_path);
-        int org_length         = wav.size();
+        auto start_time = std::chrono::high_resolution_clock::now();
 
-        std::cout << "Original length: " << org_length << std::endl;
+        // Load and resample audio
+        std::vector<float> wav    = myk_tiny::loadWav(raw_path);
+        int org_length            = wav.size();
         std::vector<float> wav16k = resampleAudio(wav, 16000, 16000);
 
+        auto hubert_start = std::chrono::high_resolution_clock::now();
         // Get hubert features as Ort::Value tensor
-        Ort::Value hubert_tensor = forward_vec_model(wav);
-        //
+        Ort::Value hubert_tensor = forward_vec_model(wav16k);
+        auto hubert_end          = std::chrono::high_resolution_clock::now();
 
         // Get output shape
         auto output_shape =
           hubert_tensor.GetTensorTypeAndShapeInfo().GetShape();
         int hubert_length = output_shape[1];
 
-        std::cout << "Hubert length: " << hubert_length << std::endl;
-        std::cout << "Hubert length: " << output_shape[0] << " "
-                  << output_shape[2] << std::endl;
-
+        auto f0_start = std::chrono::high_resolution_clock::now();
         // Compute F0
-        auto [pitchf, pitch] = compute_f0(wav, hubert_length, 1);
+        auto [pitchf, pitch] = compute_f0(wav, hubert_length, f0_up_key);
+        auto f0_end          = std::chrono::high_resolution_clock::now();
 
         // Prepare input tensors
         std::vector<int64_t> ds = { sid };
 
+        auto rvc_start = std::chrono::high_resolution_clock::now();
         // Forward pass through RVC model
         auto out_wav =
           forward_rvc_model(hubert_tensor, hubert_length, pitch, pitchf, ds);
+        auto rvc_end = std::chrono::high_resolution_clock::now();
 
-        // Ensure out_wav is correctly sized (if needed, slice to original
-        // length)
-        if (out_wav.size() > org_length)
-        {
-            out_wav.resize(org_length);
-        }
+        auto end_time = std::chrono::high_resolution_clock::now();
+
+        // Calculate durations
+        auto total_duration =
+          std::chrono::duration_cast<std::chrono::milliseconds>(end_time -
+                                                                start_time)
+            .count();
+        auto hubert_duration =
+          std::chrono::duration_cast<std::chrono::milliseconds>(hubert_end -
+                                                                hubert_start)
+            .count();
+        auto f0_duration =
+          std::chrono::duration_cast<std::chrono::milliseconds>(f0_end -
+                                                                f0_start)
+            .count();
+        auto rvc_duration =
+          std::chrono::duration_cast<std::chrono::milliseconds>(rvc_end -
+                                                                rvc_start)
+            .count();
+
+        // Calculate audio duration
+        float audio_duration = static_cast<float>(org_length) / 16000;
+
+        std::cout << "Total processing time: " << total_duration << " ms"
+                  << std::endl;
+        std::cout << "Hubert processing time: " << hubert_duration << " ms"
+                  << std::endl;
+        std::cout << "F0 computation time: " << f0_duration << " ms"
+                  << std::endl;
+        std::cout << "RVC model inference time: " << rvc_duration << " ms"
+                  << std::endl;
+        std::cout << "Audio duration: " << audio_duration * 1000 << " ms"
+                  << std::endl;
+        std::cout << "Real-time factor: "
+                  << (total_duration / (audio_duration * 1000)) << std::endl;
 
         return out_wav;
     }
@@ -241,9 +276,9 @@ class OnnxRVC
     {
         Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "ContentVecTest");
         Ort::SessionOptions session_options;
-        session_options.SetIntraOpNumThreads(1);
+        session_options.SetIntraOpNumThreads(12);
         session_options.SetGraphOptimizationLevel(
-          GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+          GraphOptimizationLevel::ORT_ENABLE_BASIC);
 
         Ort::Session session(env, vec_path.c_str(), session_options);
 
@@ -323,10 +358,11 @@ class OnnxRVC
         std::vector<double> wav_double(wav.begin(), wav.end());
 
         // Determine f0_method
-        int f0_method = 1;
+        int f0_method = 0;
 
         // Estimate F0
-        auto [f0, temporal_positions] = estimateF0(wav_double, 16000, 1);
+        auto [f0, temporal_positions] =
+          estimateF0(wav_double, 16000, f0_method);
 
         // Apply up_key
         for (auto& f : f0)
@@ -361,8 +397,8 @@ class OnnxRVC
             pitch = resample_vector(pitch, length);
         }
 
-        std::cout << "F0 size: " << f0.size() << std::endl;
-        std::cout << "Pitch size: " << pitch.size() << std::endl;
+        // std::cout << "F0 size: " << f0.size() << std::endl;
+        // std::cout << "Pitch size: " << pitch.size() << std::endl;
 
         return { f0, pitch };
     }
@@ -392,9 +428,9 @@ class OnnxRVC
     {
         Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "RVCModelTest");
         Ort::SessionOptions session_options;
-        session_options.SetIntraOpNumThreads(1);
+        session_options.SetIntraOpNumThreads(12);
         session_options.SetGraphOptimizationLevel(
-          GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+          GraphOptimizationLevel::ORT_ENABLE_BASIC);
 
         Ort::Session model(env, model_path.c_str(), session_options);
         // Prepare input tensors
@@ -455,26 +491,38 @@ class OnnxRVC
                                         output_names,
                                         1);
 
+        // Print output tensor shape
+        auto output_shape =
+          output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
+        // std::cout << "Output tensor shape: ";
+        for (const auto& dim : output_shape)
+        {
+            // std::cout << dim << " ";
+        }
+        // std::cout << std::endl;
+
         // Process output
         float* output_data =
           output_tensors.front().GetTensorMutableData<float>();
         size_t output_size =
           output_tensors.front().GetTensorTypeAndShapeInfo().GetElementCount();
 
-        // Convert to vector and squeeze (removing any single-dimensional
-        // entries from the shape)
+        // Convert to vector and squeeze
         std::vector<float> out_wav(output_data, output_data + output_size);
         if (out_wav.size() > 0)
         {
-            out_wav.shrink_to_fit(); // Ensures no extra memory is used
+            out_wav.shrink_to_fit();
         }
 
-        // Padding output (same as np.pad in Python)
-        int padding =
-          2 * hop_size; // Ensure hop_size is defined and correctly set
+        // Padding output
+        int padding = 2 * hop_size;
         out_wav.insert(out_wav.end(), padding, 0.0f);
 
-        return out_wav;
+        // Resample from model's sample rate to 16kHz
+        std::vector<float> resampled_wav =
+          resampleAudio(out_wav, sampling_rate, sr);
+
+        return resampled_wav;
     }
 
     std::vector<float> pad_audio(const std::vector<float>& audio, int pad_size)
@@ -491,18 +539,29 @@ main()
     try
     {
         OnnxRVC rvc("/Users/thomaspower/Developer/Koala/RVC_Test/onnx_models/"
-                    "amitaro_v2_16k.onnx");
+                    "cashclass55_simple.onnx",
+                    sr);
+
+        auto start_time = std::chrono::high_resolution_clock::now();
+
         std::vector<float> output =
           rvc.inference("/Users/thomaspower/Developer/Koala/RVC_Test/"
-                        "test_audio/Lead_Vocal_1.wav",
-                        0);
+                        "test_audio/Lead_Vocal_16.wav",
+                        0,
+                        0.45);
 
-        // Save or process the output as needed
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          end_time - start_time)
+                          .count();
+
+        std::cout << "Total execution time: " << duration << " ms" << std::endl;
+
         myk_tiny::saveWav(output,
                           1,
-                          16000,
+                          sr,
                           "/Users/thomaspower/Developer/Koala/RVC_Test/"
-                          "output_audio/output1.wav");
+                          "output_audio2/oytp.wav");
     }
     catch (const Ort::Exception& e)
     {
@@ -516,5 +575,6 @@ main()
         std::cerr << "An error occurred: " << e.what() << std::endl;
         return 1;
     }
+
     return 0;
 }
