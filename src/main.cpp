@@ -6,11 +6,12 @@
 #include <cmath>
 #include <fstream>
 #include <samplerate.h>
+#include <sstream>
 
 #include <world/harvest.h>
 #include <world/dio.h>
 
-static const int sr = 40000;
+static const int sr = 48000;
 
 std::vector<float>
 runContentVec(const std::string& modelPath,
@@ -358,7 +359,7 @@ class OnnxRVC
         std::vector<double> wav_double(wav.begin(), wav.end());
 
         // Determine f0_method
-        int f0_method = 0;
+        int f0_method = 1;
 
         // Estimate F0
         auto [f0, temporal_positions] =
@@ -539,7 +540,7 @@ main()
     try
     {
         OnnxRVC rvc("/Users/thomaspower/Developer/Koala/RVC_Test/onnx_models/"
-                    "cashclass55_simple.onnx",
+                    "trentreznor-48k_simple.onnx",
                     sr);
 
         auto start_time = std::chrono::high_resolution_clock::now();
@@ -557,11 +558,17 @@ main()
 
         std::cout << "Total execution time: " << duration << " ms" << std::endl;
 
-        myk_tiny::saveWav(output,
-                          1,
-                          sr,
-                          "/Users/thomaspower/Developer/Koala/RVC_Test/"
-                          "output_audio2/oytp.wav");
+        // Generate a dynamic output file name using the current timestamp
+        auto now   = std::chrono::system_clock::now();
+        auto now_c = std::chrono::system_clock::to_time_t(now);
+        std::stringstream ss;
+        ss
+          << "/Users/thomaspower/Developer/Koala/RVC_Test/output_audio2/output_"
+          << std::put_time(std::localtime(&now_c), "%Y%m%d_%H%M%S") << ".wav";
+        std::string output_file = ss.str();
+
+        myk_tiny::saveWav(output, 1, sr, output_file);
+        std::cout << "Output saved to: " << output_file << std::endl;
     }
     catch (const Ort::Exception& e)
     {
