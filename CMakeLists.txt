@@ -45,6 +45,8 @@ if(USE_PORTAUDIO)
 
 else()
     add_executable(llvc_test 
+  
+    src/Onnx_RVC.cpp
     src/main.cpp
     ../lib/tinywav/tinywav.c
     ../lib/tinywav/myk_tiny.cpp
