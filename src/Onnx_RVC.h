@@ -237,6 +237,10 @@ class OnnxRVC
         }
 
         std::vector<float> audio_data = audioFile.samples[0];
+        std::cout << "Audio file loaded successfully"
+                  << audioFile.getSampleRate() << std::endl;
+
+        auto [pitchf, pitch] = compute_f0(audio_data, f0_up_key);
 
         // std::vector<float> downsampled =
         //   resampleAudio(audio_data, audioFile.getSampleRate(), 8000);
@@ -249,12 +253,12 @@ class OnnxRVC
           dummy_hubert_tensor.GetTensorTypeAndShapeInfo().GetShape();
         int dummy_hubert_length = hubert_shape[1];
 
-        // auto [pitchf, pitch] =
-        //   compute_f0(audio_data, dummy_hubert_length, f0_up_key);
+        pitchf = resample_vector(pitchf, dummy_hubert_length);
+        pitch  = resample_vector(pitch, dummy_hubert_length);
 
         // // Create dummy pitch data matching the hubert length
-        std::vector<float> pitchf(dummy_hubert_length, 100.0f);
-        std::vector<int64_t> pitch(dummy_hubert_length, 50);
+        // std::vector<float> pitchf(dummy_hubert_length, 100.0f);
+        // std::vector<int64_t> pitch(dummy_hubert_length, 50);
         std::vector<int64_t> dummy_ds = { 1 };
 
         // Forward pass through RVC model
@@ -448,8 +452,9 @@ class OnnxRVC
         return new_tensor;
     }
 
-    std::pair<std::vector<float>, std::vector<int64_t>>
-    compute_f0(const std::vector<float>& wav, int length, float up_key)
+    std::pair<std::vector<float>, std::vector<int64_t>> compute_f0(
+      const std::vector<float>& wav,
+      float up_key)
     {
         // Convert wav to double precision for Harvest
         std::vector<double> wav_double(wav.begin(), wav.end());
@@ -485,13 +490,6 @@ class OnnxRVC
             }
             f0_mel   = std::clamp(f0_mel, 1.0f, 255.0f);
             pitch[i] = static_cast<int64_t>(std::round(f0_mel));
-        }
-
-        // Resize f0 and pitch to match the required length
-        if (f0.size() != length)
-        {
-            f0    = resample_vector(f0, length);
-            pitch = resample_vector(pitch, length);
         }
 
         // std::cout << "F0 size: " << f0.size() << std::endl;

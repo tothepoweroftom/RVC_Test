@@ -16,8 +16,6 @@ main()
                     "/Users/thomaspower/Developer/Koala/RVC_Test/onnx_models/"
                     "vec-768-layer-12.onnx");
 
-        rvc.warmup();
-
         std::vector<float> output =
           rvc.inference("/Users/thomaspower/Developer/Koala/RVC_Test/"
                         "test_audio/test_16khz.wav",
