@@ -16,7 +16,7 @@
 #include <world/harvest.h>
 #include <world/dio.h>
 
-static const int sr = 48000;
+static const int sr = 40000;
 
 std::pair<std::vector<float>, std::vector<float>>
 estimateF0(const std::vector<double>& wav, int fs, int f0_method = 1)
@@ -152,7 +152,7 @@ class OnnxRVC
         {
             vec_session = std::make_unique<Ort::Session>(
               vec_env, vec_path.c_str(), session_options_vec);
-            std::cout << "Vec model loaded successfully" << std::endl;
+            // std::cout << "Vec model loaded successfully" << std::endl;
         }
         catch (const Ort::Exception& e)
         {
@@ -226,7 +226,6 @@ class OnnxRVC
                                  float pad_time     = 0.5,
                                  float cr_threshold = 0.02)
     {
-
         // Use AudioFile to load
         AudioFile<float> audioFile;
         bool loaded = audioFile.load(raw_path);
@@ -237,114 +236,73 @@ class OnnxRVC
         }
 
         std::vector<float> audio_data = audioFile.samples[0];
-        std::cout << "Audio file loaded successfully"
-                  << audioFile.getSampleRate() << std::endl;
+        int input_sample_rate         = audioFile.getSampleRate();
 
-        auto [pitchf, pitch] = compute_f0(audio_data, f0_up_key);
+        std::cout << "Audio file loaded successfully. Sample rate: "
+                  << input_sample_rate << std::endl;
 
-        // std::vector<float> downsampled =
-        //   resampleAudio(audio_data, audioFile.getSampleRate(), 8000);
+        // Define chunk size and overlap
+        const int chunk_size =
+          4096 * 4; // Adjust based on your model's requirements
+        const int overlap = chunk_size / 8; // 1/8th of chunk size for overlap
 
-        // Forward pass through vec model
-        Ort::Value dummy_hubert_tensor = forward_vec_model(audio_data);
+        std::vector<float> output_audio;
 
-        // Get the actual shape of the hubert tensor
-        auto hubert_shape =
-          dummy_hubert_tensor.GetTensorTypeAndShapeInfo().GetShape();
-        int dummy_hubert_length = hubert_shape[1];
-
-        pitchf = resample_vector(pitchf, dummy_hubert_length);
-        pitch  = resample_vector(pitch, dummy_hubert_length);
-
-        // // Create dummy pitch data matching the hubert length
-        // std::vector<float> pitchf(dummy_hubert_length, 100.0f);
-        // std::vector<int64_t> pitch(dummy_hubert_length, 50);
-        std::vector<int64_t> dummy_ds = { 1 };
-
-        // Forward pass through RVC model
-        try
+        for (size_t start = 0; start < audio_data.size();
+             start += (chunk_size - overlap))
         {
-            audio_data = forward_rvc_model(dummy_hubert_tensor,
-                                           dummy_hubert_length,
-                                           pitch,
-                                           pitchf,
-                                           dummy_ds);
-            std::cout << "Warm-up complete." << std::endl;
-            return audio_data;
+            size_t end = std::min(start + chunk_size, audio_data.size());
+            std::vector<float> chunk(audio_data.begin() + start,
+                                     audio_data.begin() + end);
+
+            // Pad the last chunk if necessary
+            if (end == audio_data.size())
+            {
+                chunk.resize(chunk_size, 0.0f);
+            }
+
+            // Process the chunk
+            auto [pitchf, pitch]     = compute_f0(chunk, f0_up_key);
+            Ort::Value hubert_tensor = forward_vec_model(chunk);
+
+            auto hubert_shape =
+              hubert_tensor.GetTensorTypeAndShapeInfo().GetShape();
+            int hubert_length = hubert_shape[1];
+
+            pitchf = resample_vector(pitchf, hubert_length);
+            pitch  = resample_vector(pitch, hubert_length);
+
+            std::vector<int64_t> dummy_ds = { 1 };
+
+            std::vector<float> chunk_output = forward_rvc_model(
+              hubert_tensor, hubert_length, pitch, pitchf, dummy_ds);
+
+            // Overlap-add
+            if (output_audio.empty())
+            {
+                output_audio = chunk_output;
+            }
+            else
+            {
+                // Crossfade the overlapping region
+                size_t overlap_samples =
+                  overlap * (chunk_output.size() / chunk_size);
+                for (size_t i = 0; i < overlap_samples; ++i)
+                {
+                    float t = static_cast<float>(i) / overlap_samples;
+                    output_audio[output_audio.size() - overlap_samples + i] =
+                      output_audio[output_audio.size() - overlap_samples + i] *
+                        (1 - t) +
+                      chunk_output[i] * t;
+                }
+                // Append the non-overlapping part
+                output_audio.insert(output_audio.end(),
+                                    chunk_output.begin() + overlap_samples,
+                                    chunk_output.end());
+            }
         }
-        catch (const Ort::Exception& e)
-        {
-            std::cerr << "Error during warm-up: " << e.what() << std::endl;
-            return std::vector<float>();
-            // Continue execution even if warm-up fails
-        }
-        // auto start_time = std::chrono::high_resolution_clock::now();
 
-        // // Load and resample audio
-        // std::vector<float> wav    = myk_tiny::loadWav(raw_path);
-        // int org_length            = wav.size();
-        // std::vector<float> wav16k = resampleAudio(wav, 16000, 16000);
-
-        // std::cout << "Loaded audio length: " << wav16k.size() << std::endl;
-
-        // auto hubert_start = std::chrono::high_resolution_clock::now();
-        // // Forward pass through vec model
-        // Ort::Value hubert_tensor = forward_vec_model(wav16k);
-        // auto hubert_end          = std::chrono::high_resolution_clock::now();
-
-        // // Get the actual shape of the hubert tensor
-        // auto hubert_shape =
-        //   hubert_tensor.GetTensorTypeAndShapeInfo().GetShape();
-        // int hubert_length = hubert_shape[1];
-
-        // std::cout << "Hubert tensor shape: ";
-        // for (const auto& dim : hubert_shape)
-        // {
-        //     std::cout << dim << " ";
-        // }
-        // std::cout << std::endl;
-
-        // // Create pitch data matching the hubert length
-        // auto [pitchf, pitch]    = compute_f0(wav16k, hubert_length,
-        // f0_up_key); std::vector<int64_t> ds = { 1 };
-
-        // auto rvc_start = std::chrono::high_resolution_clock::now();
-        // // Forward pass through RVC model
-        // auto out_wav =
-        //   forward_rvc_model(hubert_tensor, hubert_length, pitch, pitchf, ds);
-        // auto rvc_end = std::chrono::high_resolution_clock::now();
-
-        // auto end_time = std::chrono::high_resolution_clock::now();
-
-        // // Calculate durations
-        // auto total_duration =
-        //   std::chrono::duration_cast<std::chrono::milliseconds>(end_time -
-        //                                                         start_time)
-        //     .count();
-        // auto hubert_duration =
-        //   std::chrono::duration_cast<std::chrono::milliseconds>(hubert_end -
-        //                                                         hubert_start)
-        //     .count();
-        // auto rvc_duration =
-        //   std::chrono::duration_cast<std::chrono::milliseconds>(rvc_end -
-        //                                                         rvc_start)
-        //     .count();
-
-        // // Calculate audio duration
-        // float audio_duration = static_cast<float>(org_length) / 16000;
-
-        // std::cout << "Total processing time: " << total_duration << " ms"
-        //           << std::endl;
-        // std::cout << "Hubert processing time: " << hubert_duration << " ms"
-        //           << std::endl;
-        // std::cout << "RVC model inference time: " << rvc_duration << " ms"
-        //           << std::endl;
-        // std::cout << "Audio duration: " << audio_duration * 1000 << " ms"
-        //           << std::endl;
-        // std::cout << "Real-time factor: "
-        //           << (total_duration / (audio_duration * 1000)) << std::endl;
-
-        // return out_wav;
+        return output_audio;
     }
 
   private:
@@ -522,31 +480,31 @@ class OnnxRVC
                                          const std::vector<int64_t>& ds)
 
     {
-        std::cout << "Hubert tensor shape: ";
-        for (const auto& dim :
-             hubert_tensor.GetTensorTypeAndShapeInfo().GetShape())
-        {
-            std::cout << dim << " ";
-        }
-        std::cout << std::endl;
+        // std::cout << "Hubert tensor shape: ";
+        // for (const auto& dim :
+        //      hubert_tensor.GetTensorTypeAndShapeInfo().GetShape())
+        // {
+        //     std::cout << dim << " ";
+        // }
+        // std::cout << std::endl;
 
-        std::cout << "Hubert length: " << hubert_length << std::endl;
-        std::cout << "Pitch size: " << pitch.size() << std::endl;
-        std::cout << "Pitchf size: " << pitchf.size() << std::endl;
-        std::cout << "DS size: " << ds.size() << std::endl;
+        // std::cout << "Hubert length: " << hubert_length << std::endl;
+        // std::cout << "Pitch size: " << pitch.size() << std::endl;
+        // std::cout << "Pitchf size: " << pitchf.size() << std::endl;
+        // std::cout << "DS size: " << ds.size() << std::endl;
 
         float* hubert_data = hubert_tensor.GetTensorMutableData<float>();
-        std::cout << "First 15 values of Hubert tensor: ";
-        for (int i = 0; i < std::min(15, hubert_length * 768); ++i)
-        {
-            std::cout << hubert_data[i] << " ";
+        // // std::cout << "First 15 values of Hubert tensor: ";
+        // for (int i = 0; i < std::min(15, hubert_length * 768); ++i)
+        // {
+        //     std::cout << hubert_data[i] << " ";
 
-            if (std::isnan(hubert_data[i]))
-            {
-                return std::vector<float>();
-            }
-        }
-        std::cout << std::endl;
+        //     if (std::isnan(hubert_data[i]))
+        //     {
+        //         return std::vector<float>();
+        //     }
+        // }
+        // std::cout << std::endl;
 
         // Prepare input tensors
         std::vector<int64_t> hubert_shape = { 1, hubert_length, 768 };
@@ -642,17 +600,18 @@ class OnnxRVC
         }
 
         // Debug output
-        std::cout << "Output size: " << out_wav.size() << std::endl;
-        if (!out_wav.empty())
-        {
-            std::cout << "First 15 values: ";
-            for (int i = 0; i < std::min(15, static_cast<int>(out_wav.size()));
-                 ++i)
-            {
-                std::cout << out_wav[i] << " ";
-            }
-            std::cout << std::endl;
-        }
+        // std::cout << "Output size: " << out_wav.size() << std::endl;
+        // if (!out_wav.empty())
+        // {
+        //     std::cout << "First 15 values: ";
+        //     for (int i = 0; i < std::min(15,
+        //     static_cast<int>(out_wav.size()));
+        //          ++i)
+        //     {
+        //         std::cout << out_wav[i] << " ";
+        //     }
+        //     std::cout << std::endl;
+        // }
 
         // Padding output
         int padding = 2 * hop_size;
