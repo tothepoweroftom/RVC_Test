@@ -1,3 +1,6 @@
 [submodule "vendor/world"]
 	path = vendor/world
 	url = git@github.com:mmorise/World.git
+[submodule "vendor/AudioFile"]
+	path = vendor/AudioFile
+	url = git@github.com:adamstark/AudioFile.git

@@ -11,11 +11,12 @@
 #include <memory>
 #include <cassert>
 #include <numeric>
+#include <AudioFile.h>
 
 #include <world/harvest.h>
 #include <world/dio.h>
 
-static const int sr = 40000;
+static const int sr = 48000;
 
 std::pair<std::vector<float>, std::vector<float>>
 estimateF0(const std::vector<double>& wav, int fs, int f0_method = 1)
@@ -127,7 +128,7 @@ class OnnxRVC
       : sampling_rate(sr)
       , hop_size(hop_size)
       , rvc_env(ORT_LOGGING_LEVEL_WARNING, "RVC_OnnxRVC")
-      , vec_env(ORT_LOGGING_LEVEL_WARNING, "VEC_OnnxRVC")
+      , vec_env(ORT_LOGGING_LEVEL_VERBOSE, "VEC_OnnxRVC")
       , vec_session(nullptr)
       , rvc_session(nullptr)
       , memory_info(
@@ -137,9 +138,15 @@ class OnnxRVC
     {
         Ort::SessionOptions session_options;
         session_options.SetIntraOpNumThreads(0);
+        session_options.SetGraphOptimizationLevel(
+          GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
 
         Ort::SessionOptions session_options_vec;
-        session_options.SetIntraOpNumThreads(0);
+        session_options.SetIntraOpNumThreads(6);
+        session_options.SetGraphOptimizationLevel(
+          GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+        // Set parallel
+        session_options.SetExecutionMode(ORT_PARALLEL);
 
         try
         {
@@ -219,73 +226,121 @@ class OnnxRVC
                                  float pad_time     = 0.5,
                                  float cr_threshold = 0.02)
     {
-        auto start_time = std::chrono::high_resolution_clock::now();
 
-        // Load and resample audio
-        std::vector<float> wav    = myk_tiny::loadWav(raw_path);
-        int org_length            = wav.size();
-        std::vector<float> wav16k = resampleAudio(wav, 16000, 16000);
+        // Use AudioFile to load
+        AudioFile<float> audioFile;
+        bool loaded = audioFile.load(raw_path);
+        if (!loaded)
+        {
+            std::cerr << "Failed to load audio file: " << raw_path << std::endl;
+            return std::vector<float>();
+        }
 
-        std::cout << "Loaded audio length: " << wav16k.size() << std::endl;
+        std::vector<float> audio_data = audioFile.samples[0];
 
-        auto hubert_start = std::chrono::high_resolution_clock::now();
+        // std::vector<float> downsampled =
+        //   resampleAudio(audio_data, audioFile.getSampleRate(), 8000);
+
         // Forward pass through vec model
-        Ort::Value hubert_tensor = forward_vec_model(wav16k);
-        auto hubert_end          = std::chrono::high_resolution_clock::now();
+        Ort::Value dummy_hubert_tensor = forward_vec_model(audio_data);
 
         // Get the actual shape of the hubert tensor
         auto hubert_shape =
-          hubert_tensor.GetTensorTypeAndShapeInfo().GetShape();
-        int hubert_length = hubert_shape[1];
+          dummy_hubert_tensor.GetTensorTypeAndShapeInfo().GetShape();
+        int dummy_hubert_length = hubert_shape[1];
 
-        std::cout << "Hubert tensor shape: ";
-        for (const auto& dim : hubert_shape)
-        {
-            std::cout << dim << " ";
-        }
-        std::cout << std::endl;
+        // auto [pitchf, pitch] =
+        //   compute_f0(audio_data, dummy_hubert_length, f0_up_key);
 
-        // Create pitch data matching the hubert length
-        auto [pitchf, pitch]    = compute_f0(wav16k, hubert_length, f0_up_key);
-        std::vector<int64_t> ds = { 1 };
+        // // Create dummy pitch data matching the hubert length
+        std::vector<float> pitchf(dummy_hubert_length, 100.0f);
+        std::vector<int64_t> pitch(dummy_hubert_length, 50);
+        std::vector<int64_t> dummy_ds = { 1 };
 
-        auto rvc_start = std::chrono::high_resolution_clock::now();
         // Forward pass through RVC model
-        auto out_wav =
-          forward_rvc_model(hubert_tensor, hubert_length, pitch, pitchf, ds);
-        auto rvc_end = std::chrono::high_resolution_clock::now();
+        try
+        {
+            audio_data = forward_rvc_model(dummy_hubert_tensor,
+                                           dummy_hubert_length,
+                                           pitch,
+                                           pitchf,
+                                           dummy_ds);
+            std::cout << "Warm-up complete." << std::endl;
+            return audio_data;
+        }
+        catch (const Ort::Exception& e)
+        {
+            std::cerr << "Error during warm-up: " << e.what() << std::endl;
+            return std::vector<float>();
+            // Continue execution even if warm-up fails
+        }
+        // auto start_time = std::chrono::high_resolution_clock::now();
 
-        auto end_time = std::chrono::high_resolution_clock::now();
+        // // Load and resample audio
+        // std::vector<float> wav    = myk_tiny::loadWav(raw_path);
+        // int org_length            = wav.size();
+        // std::vector<float> wav16k = resampleAudio(wav, 16000, 16000);
 
-        // Calculate durations
-        auto total_duration =
-          std::chrono::duration_cast<std::chrono::milliseconds>(end_time -
-                                                                start_time)
-            .count();
-        auto hubert_duration =
-          std::chrono::duration_cast<std::chrono::milliseconds>(hubert_end -
-                                                                hubert_start)
-            .count();
-        auto rvc_duration =
-          std::chrono::duration_cast<std::chrono::milliseconds>(rvc_end -
-                                                                rvc_start)
-            .count();
+        // std::cout << "Loaded audio length: " << wav16k.size() << std::endl;
 
-        // Calculate audio duration
-        float audio_duration = static_cast<float>(org_length) / 16000;
+        // auto hubert_start = std::chrono::high_resolution_clock::now();
+        // // Forward pass through vec model
+        // Ort::Value hubert_tensor = forward_vec_model(wav16k);
+        // auto hubert_end          = std::chrono::high_resolution_clock::now();
 
-        std::cout << "Total processing time: " << total_duration << " ms"
-                  << std::endl;
-        std::cout << "Hubert processing time: " << hubert_duration << " ms"
-                  << std::endl;
-        std::cout << "RVC model inference time: " << rvc_duration << " ms"
-                  << std::endl;
-        std::cout << "Audio duration: " << audio_duration * 1000 << " ms"
-                  << std::endl;
-        std::cout << "Real-time factor: "
-                  << (total_duration / (audio_duration * 1000)) << std::endl;
+        // // Get the actual shape of the hubert tensor
+        // auto hubert_shape =
+        //   hubert_tensor.GetTensorTypeAndShapeInfo().GetShape();
+        // int hubert_length = hubert_shape[1];
 
-        return out_wav;
+        // std::cout << "Hubert tensor shape: ";
+        // for (const auto& dim : hubert_shape)
+        // {
+        //     std::cout << dim << " ";
+        // }
+        // std::cout << std::endl;
+
+        // // Create pitch data matching the hubert length
+        // auto [pitchf, pitch]    = compute_f0(wav16k, hubert_length,
+        // f0_up_key); std::vector<int64_t> ds = { 1 };
+
+        // auto rvc_start = std::chrono::high_resolution_clock::now();
+        // // Forward pass through RVC model
+        // auto out_wav =
+        //   forward_rvc_model(hubert_tensor, hubert_length, pitch, pitchf, ds);
+        // auto rvc_end = std::chrono::high_resolution_clock::now();
+
+        // auto end_time = std::chrono::high_resolution_clock::now();
+
+        // // Calculate durations
+        // auto total_duration =
+        //   std::chrono::duration_cast<std::chrono::milliseconds>(end_time -
+        //                                                         start_time)
+        //     .count();
+        // auto hubert_duration =
+        //   std::chrono::duration_cast<std::chrono::milliseconds>(hubert_end -
+        //                                                         hubert_start)
+        //     .count();
+        // auto rvc_duration =
+        //   std::chrono::duration_cast<std::chrono::milliseconds>(rvc_end -
+        //                                                         rvc_start)
+        //     .count();
+
+        // // Calculate audio duration
+        // float audio_duration = static_cast<float>(org_length) / 16000;
+
+        // std::cout << "Total processing time: " << total_duration << " ms"
+        //           << std::endl;
+        // std::cout << "Hubert processing time: " << hubert_duration << " ms"
+        //           << std::endl;
+        // std::cout << "RVC model inference time: " << rvc_duration << " ms"
+        //           << std::endl;
+        // std::cout << "Audio duration: " << audio_duration * 1000 << " ms"
+        //           << std::endl;
+        // std::cout << "Real-time factor: "
+        //           << (total_duration / (audio_duration * 1000)) << std::endl;
+
+        // return out_wav;
     }
 
   private:

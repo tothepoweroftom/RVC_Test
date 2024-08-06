@@ -25,6 +25,7 @@ option(USE_PORTAUDIO "Use PortAudio" OFF)
 # Add world pitch detection lib
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/vendor/world)
 
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/vendor/AudioFile)
 
 
 
@@ -53,7 +54,7 @@ else()
     )
     target_include_directories(llvc_test PRIVATE ${BACKEND_BUILD_HEADER_DIRS} ${SAMPLERATE_INCLUDE_DIRS} "${CMAKE_CURRENT_SOURCE_DIR}/vendor/world/src/")
     target_link_directories(llvc_test PRIVATE ${BACKEND_BUILD_LIBRARY_DIRS} ${SAMPLERATE_LIBRARY_DIRS} )
-    target_link_libraries(llvc_test PRIVATE onnxruntime world::core ${SAMPLERATE_LIBRARIES})
+    target_link_libraries(llvc_test PRIVATE onnxruntime world::core ${SAMPLERATE_LIBRARIES} AudioFile)
     # Main executable
 
 endif()

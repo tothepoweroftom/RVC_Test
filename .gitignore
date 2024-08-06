@@ -13,4 +13,3 @@ _lastBuild/*
 /test_audio/
 /output_audio/
 /onnx_models/
-/vendor/
