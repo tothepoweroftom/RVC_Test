@@ -243,8 +243,8 @@ class OnnxRVC
 
         // Define chunk size and overlap
         const int chunk_size =
-          4096 * 4; // Adjust based on your model's requirements
-        const int overlap = chunk_size / 8; // 1/8th of chunk size for overlap
+          sampling_rate / 2; // Adjust based on your model's requirements
+        const int overlap = chunk_size / 16; // 1/8th of chunk size for overlap
 
         std::vector<float> output_audio;
 

@@ -10,8 +10,8 @@ main()
     try
     {
         OnnxRVC rvc("/Users/thomaspower/Developer/Koala/RVC_Test/onnx_models/"
-                    "cashclass55_simple.onnx",
-                    40000,
+                    "james.onnx",
+                    48000,
                     512,
                     "/Users/thomaspower/Developer/Koala/RVC_Test/onnx_models/"
                     "vec-768-layer-12.onnx");
@@ -20,7 +20,7 @@ main()
           rvc.inference("/Users/thomaspower/Developer/Koala/RVC_Test/"
                         "test_audio/Lead_Vocal_1.wav",
                         1,
-                        0.75);
+                        1.2);
 
         // Generate a dynamic output file name using the current timestamp
         auto now   = std::chrono::system_clock::now();
