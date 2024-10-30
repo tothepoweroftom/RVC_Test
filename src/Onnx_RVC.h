@@ -114,7 +114,6 @@ class OnnxRVC
 
     ~OnnxRVC()
     {
-
         vec_session.reset();
         rvc_session.reset();
     }
