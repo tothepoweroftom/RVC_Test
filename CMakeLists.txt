@@ -29,35 +29,22 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/vendor/AudioFile)
 
 
 
-if(USE_PORTAUDIO)
-    add_executable(llvc_test_pa 
-    src/main_pa_threading.cpp
-    ../lib/tinywav/tinywav.c
-    ../lib/tinywav/myk_tiny.cpp
-    )
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(PORTAUDIO REQUIRED portaudio-2.0)
-    include_directories(${PORTAUDIO_INCLUDE_DIRS})
-    target_include_directories(llvc_test_pa PRIVATE ${BACKEND_BUILD_HEADER_DIRS} ${PORTAUDIO_INCLUDE_DIRS} ${SAMPLERATE_INCLUDE_DIRS} "${CMAKE_CURRENT_SOURCE_DIR}/vendor/world/src/")
-    target_link_directories(llvc_test_pa PRIVATE ${BACKEND_BUILD_LIBRARY_DIRS} ${PORTAUDIO_LIBRARY_DIRS} )
-    target_link_libraries(llvc_test_pa onnxruntime world::core ${PORTAUDIO_LIBRARIES} ${SAMPLERATE_LIBRARIES})
-    message(STATUS "Using PortAudio")
-    # Main executable
 
-else()
-    add_executable(llvc_test 
-  
-    src/Onnx_RVC.cpp
+add_executable(llvc_test 
+    src/F0Estimator.h
+    src/Onnx_RVC.h
+    src/F0Estimator.cpp
+    
     src/main.cpp
     ../lib/tinywav/tinywav.c
     ../lib/tinywav/myk_tiny.cpp
-    )
-    target_include_directories(llvc_test PRIVATE ${BACKEND_BUILD_HEADER_DIRS} ${SAMPLERATE_INCLUDE_DIRS} "${CMAKE_CURRENT_SOURCE_DIR}/vendor/world/src/")
-    target_link_directories(llvc_test PRIVATE ${BACKEND_BUILD_LIBRARY_DIRS} ${SAMPLERATE_LIBRARY_DIRS} )
-    target_link_libraries(llvc_test PRIVATE onnxruntime world::core ${SAMPLERATE_LIBRARIES} AudioFile)
-    # Main executable
+)
+target_include_directories(llvc_test PRIVATE ${BACKEND_BUILD_HEADER_DIRS} ${SAMPLERATE_INCLUDE_DIRS} "${CMAKE_CURRENT_SOURCE_DIR}/vendor/world/src/")
+target_link_directories(llvc_test PRIVATE ${BACKEND_BUILD_LIBRARY_DIRS} ${SAMPLERATE_LIBRARY_DIRS} )
+target_link_libraries(llvc_test PRIVATE onnxruntime world::core ${SAMPLERATE_LIBRARIES} AudioFile)
+# Main executable
 
-endif()
+
 
 endif()
 
