@@ -31,10 +31,13 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/vendor/AudioFile)
 
 
 add_executable(llvc_test 
+    src/RingBuffer.h
     src/F0Estimator.h
     src/Onnx_RVC.h
+    src/Utils.h
+    # source files
     src/F0Estimator.cpp
-    
+    src/Onnx_RVC.cpp
     src/main.cpp
     ../lib/tinywav/tinywav.c
     ../lib/tinywav/myk_tiny.cpp
