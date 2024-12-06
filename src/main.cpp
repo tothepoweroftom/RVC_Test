@@ -43,8 +43,9 @@ main()
         //   rvc.inference(audio_data, input_sample_rate);
 
         // Define chunk size and overlap
-        const int chunk_size = 16000;          // 0.5 second chunks
-        const int overlap    = chunk_size / 2; // 1/16th overlap
+        const int chunk_size =
+          4096; // Adjust based on your model's requirements
+        const int overlap = chunk_size / 8; // 1/8th of chunk size for overlap
 
         std::vector<float> final_output;
 

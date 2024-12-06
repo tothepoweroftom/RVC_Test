@@ -13,7 +13,6 @@
 
 #include "F0Estimator.h"
 #include "Utils.h"
-#include "RingBuffer.h"
 
 static const int sr = 40000;
 
@@ -33,8 +32,7 @@ class OnnxRVC
 
   private:
     int model_sample_rate;
-    Ort::Env rvc_env;
-    Ort::Env vec_env;
+    Ort::Env env;
     Ort::SessionOptions session_options;
     std::unique_ptr<Ort::Session> vec_session;
     std::unique_ptr<Ort::Session> rvc_session;
@@ -50,7 +48,8 @@ class OnnxRVC
     RingBuffer inputBuffer_;
     RingBuffer outputBuffer_;
 
-    Ort::Value forward_vec_model(const std::vector<float>& wav16k);
+    Ort::Value forward_vec_model(const std::vector<float>& audio,
+                                 int samplerate);
 
     std::pair<std::vector<float>, std::vector<int64_t>> compute_f0(
       const std::vector<float>& wav,

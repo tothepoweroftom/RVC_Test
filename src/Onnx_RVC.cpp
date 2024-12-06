@@ -5,26 +5,19 @@
 OnnxRVC::OnnxRVC(const std::string& model_path,
                  int sr,
                  const std::string& vec_path)
-  : model_sample_rate(model_sample_rate)
-
-  , rvc_env(ORT_LOGGING_LEVEL_WARNING, "RVC_OnnxRVC")
-  , vec_env(ORT_LOGGING_LEVEL_VERBOSE, "VEC_OnnxRVC")
-  , vec_session(nullptr)
-  , rvc_session(nullptr)
+  : model_sample_rate(sr)
+  , env(ORT_LOGGING_LEVEL_WARNING, "OnnxRVC")
   , memory_info(Ort::MemoryInfo::CreateCpu(OrtAllocatorType::OrtArenaAllocator,
                                            OrtMemTypeCPU))
-  , inputBuffer_(16000 * 2)
-  , outputBuffer_(16000 * 2)
-{
-    // Setup Onnx session objects
-    Ort::SessionOptions session_options;
 
-    Ort::SessionOptions session_options_vec;
+{
+    // Set up common session options
+    Ort::SessionOptions session_options;
 
     try
     {
         vec_session = std::make_unique<Ort::Session>(
-          vec_env, vec_path.c_str(), session_options_vec);
+          env, vec_path.c_str(), session_options);
     }
     catch (const Ort::Exception& e)
     {
@@ -35,7 +28,7 @@ OnnxRVC::OnnxRVC(const std::string& model_path,
     try
     {
         rvc_session = std::make_unique<Ort::Session>(
-          rvc_env, model_path.c_str(), session_options);
+          env, model_path.c_str(), session_options);
         std::cout << "RVC model loaded successfully" << std::endl;
     }
     catch (const Ort::Exception& e)
@@ -56,7 +49,7 @@ OnnxRVC::inference(std::vector<float> audio_data, float input_sample_rate)
 
     // Process the audio to get the input data for RVC
     auto [pitchf, pitch]     = compute_f0(audio_data, 1.0f);
-    Ort::Value hubert_tensor = forward_vec_model(audio_data);
+    Ort::Value hubert_tensor = forward_vec_model(audio_data, input_sample_rate);
 
     // TODO: See if we can use Faiss to do vector index matching with trained
     // data (accent)
@@ -80,8 +73,20 @@ OnnxRVC::inference(std::vector<float> audio_data, float input_sample_rate)
 }
 
 Ort::Value
-OnnxRVC::forward_vec_model(const std::vector<float>& wav16k)
+OnnxRVC::forward_vec_model(const std::vector<float>& audio_data,
+                           int input_sample_rate)
 {
+
+    std::vector<float> wav16k;
+    if (input_sample_rate != 16000)
+    {
+        wav16k = Utils::resampleAudio(audio_data, input_sample_rate, 16000);
+    }
+    else
+    {
+        wav16k = audio_data;
+    }
+
     // Prepare input tensor
     std::vector<int64_t> input_shape = { 1,
                                          1,
@@ -279,31 +284,24 @@ OnnxRVC::forward_rvc_model(Ort::Value& hubert_tensor,
 void
 OnnxRVC::cleanup()
 {
+    if (vec_session)
     {
-        // Delete sessions
-        if (vec_session)
-        {
-            vec_session.reset();
-        }
-        if (rvc_session)
-        {
-            rvc_session.reset();
-        }
+        vec_session.reset();
+    }
+    if (rvc_session)
+    {
+        rvc_session.reset();
+    }
 
-        // Clear any stored data
-        wav16k.clear();
-        pitchf.clear();
-        pitch.clear();
-        ds.clear();
+    // Clear any stored data
+    wav16k.clear();
+    pitchf.clear();
+    pitch.clear();
+    ds.clear();
 
-        // Release any Ort::Value tensors
-        if (hubert_tensor)
-        {
-            hubert_tensor = Ort::Value(nullptr);
-        }
-
-        // Force garbage collection
-        Ort::AllocatorWithDefaultOptions allocator;
-        allocator.GetInfo();
+    // Release any Ort::Value tensors
+    if (hubert_tensor)
+    {
+        hubert_tensor = Ort::Value(nullptr);
     }
 }
